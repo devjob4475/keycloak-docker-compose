@@ -1,0 +1,108 @@
+version: '3.1'
+services:
+  db:
+    image: postgres
+    container_name: Database-Keycloak
+    hostname: postgresql
+    restart: always
+    environment:
+      POSTGRES_USER: ${KEYCLOAK_DB_NAME}
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      POSTGRES_DB: mydb
+    networks:
+      - keycloak-network
+    ports:
+      - 5432:5432
+    volumes:
+      - ./db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root"]
+      interval: 30s
+      retries: 3
+      timeout: 10s
+      
+  backup_service:
+    image: postgres
+    container_name: Backup-Database-Keycloak
+    command: sh -c "PGPASSWORD=${KEYCLOAK_DB_PASSWORD} pg_dump -h db -U root -d mydb > /backup/backup.sql"
+    networks:
+      - keycloak-network
+    volumes:
+      - ./db_backup:/backup
+    restart: always
+    
+  restore_service:
+    image: postgres
+    container_name: Restore-Database-Keycloak
+    command: sh -c "PGPASSWORD=${KEYCLOAK_DB_PASSWORD} psql -h db -U root -d mydb < /backup/backup.sql"
+    networks:
+      - keycloak-network
+    volumes:
+      - ./db_backup:/backup
+    depends_on:
+      - backup_service
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: PGAdmin-Manage-Postgrestql
+    restart: always
+    volumes:
+      - ./pgadmin_data:/var/lib/pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL_NAME}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_EMAIL_PASSWORD}
+    networks:
+      - keycloak-network
+    ports:
+      - 8080:80
+    healthcheck:
+          test: curl --fail http://localhost:8080/ || exit 1
+          interval: 40s
+          timeout: 30s
+          retries: 3
+          start_period: 60s
+
+  keycloak_web:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: Keycloak-Latest-Version
+    restart: always
+    volumes:
+      - ./keycloak/themes:/opt/keycloak/themes
+      - ./keycloak/providers:/opt/keycloak/providers
+    environment:
+      KC_DB: ${KEYCLOAK_DB}
+      KC_DB_URL: jdbc:postgresql://db:5432/keycloak
+      KC_DB_USERNAME: ${KEYCLOAK_DB_NAME}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USERNAME}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME}
+      KC_HOSTNAME_PORT: 8000
+      KC_HOSTNAME_STRICT: 'false'
+      KC_HOSTNAME_STRICT_HTTPS: 'false'
+      KC_HTTP_PORT: 8000
+      KC_LOG_LEVEL: info
+      KC_METRICS_ENABLED: 'true'
+      KC_HEALTH_ENABLED: 'true'
+    networks:
+      - keycloak-network
+    command: start-dev
+    depends_on:
+      - db
+    ports:
+      - 8000:8000
+    healthcheck:
+          test: curl --fail http://localhost:8000/ || exit 1
+          interval: 40s
+          timeout: 30s
+          retries: 3
+          start_period: 60s
+
+volumes:
+  db_data:
+  db_backup:
+  pgadmin_data:
+
+networks:
+  keycloak-network:
+    external: true
